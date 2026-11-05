@@ -99,7 +99,7 @@ function parseBeds(text){
     line=lines[i].replace(/\s+/g,' ').trim();
     if(!line)continue;
     m=line.match(/(\d{2,6})\s*-\s*([A-Za-z])(?![A-Za-z])/);
-    if(!m){bad.push(line);continue;}
+    if(!m){bad.push('Line '+(i+1)+': '+line);continue;}
     ok.push({room:parseInt(m[1],10),bed:m[2].toUpperCase()});
   }
   ok.sort(function(a,b){return a.room-b.room||(a.bed<b.bed?-1:(a.bed>b.bed?1:0));});
