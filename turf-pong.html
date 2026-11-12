@@ -78,12 +78,12 @@ body { padding-block: 0 16px; }
   <div class="controls">
     <div class="grp" id="gTeams"><span>Teams</span><button id="t2">2</button><button id="t3">3</button><button id="t4">4</button></div>
     <div class="grp" id="gSpeed"><span>Speed</span><button id="s1">1×</button><button id="s2">2×</button><button id="s4">4×</button></div>
-    <div class="grp"><button id="pw" aria-pressed="true">Power-ups</button></div>
+    <div class="grp"><button id="pw" aria-pressed="true">Power-ups</button><button id="snd" aria-pressed="true">Sound</button></div>
     <button id="restart">Restart</button>
   </div>
   <div class="recrow">
     <button id="rec">Record a game</button>
-    <span id="recMsg">Makes a 1080×1920 MP4 of one full game, ready for Reels</span>
+    <span id="recMsg">Makes a 1080×1920 MP4 with sound of one full game, ready for Reels</span>
     <a class="save" id="save" hidden>Save video</a>
   </div>
   <details><summary>Power-ups ›</summary><div class="pw" id="pwList"></div></details>
@@ -125,7 +125,14 @@ let nTeams = 2, speedMult = 1, powersOn = true;
 let owner, hp, flash, balls, pickups, time, nextPickup, over, counts, alive, shield, frozen, lastPower, recent, outs;
 let event = null, winInfo = null;
 
-const rand = (a, b) => a + Math.random() * (b - a);
+let rng = Math.random;
+function seedRandom(seed) { // mulberry32 from a string hash; same seed -> same game
+  let h = 1779033703 ^ String(seed).length;
+  for (const ch of String(seed)) { h = Math.imul(h ^ ch.charCodeAt(0), 3432918353); h = (h << 13) | (h >>> 19); }
+  let a = h >>> 0;
+  rng = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const rand = (a, b) => a + rng() * (b - a);
 const idx = (i, j) => j * COLS + i;
 const inB = (i, j) => i >= 0 && j >= 0 && i < COLS && j < ROWS;
 const rgb = hex => { const n = parseInt(hex.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
@@ -205,7 +212,7 @@ function applyPower(b, type, mirrored) {
     case "shield": shield[t] = P.dur; break;
     case "quake": for (let k = 0; k < 2; k++) for (const c of borderOf(t, true)) claim(c, t, true); break;
     case "mirror": {
-      const copy = lastPower && lastPower.team !== t ? lastPower.type : KEYS.filter(k => k !== "mirror")[Math.floor(Math.random() * (KEYS.length - 1))];
+      const copy = lastPower && lastPower.team !== t ? lastPower.type : KEYS.filter(k => k !== "mirror")[Math.floor(rng() * (KEYS.length - 1))];
       announce(t, `Mirror → ${POWERS[copy].label}`);
       applyPower(b, copy, true); return;
     }
@@ -222,6 +229,7 @@ function applyPower(b, type, mirrored) {
     }
     default: b[type] = P.dur;
   }
+  sfx(["bomb", "laser", "quake"].includes(type) ? "boom" : "power", t);
   if (P.dur === 0 && type !== "fort") recent[t].push({ k: type, left: 2 });
   if (!mirrored) { lastPower = { team: t, type }; announce(t, P.label); }
 }
@@ -243,6 +251,7 @@ function stepBall(b, h) {
     const c = idx(i, j);
     if (owner[c] === b.team) continue;
     claim(c, b.team, false);
+    sfx("hit", b.team);
     if (b.wreck > 0 && owner[c] === b.team) continue;
     if (Math.abs(ca) > Math.abs(sa)) { if (!fx) { b.dx = -Math.sign(ca) * Math.abs(b.dx); fx = true; } }
     else if (!fy) { b.dy = -Math.sign(sa) * Math.abs(b.dy); fy = true; }
@@ -289,7 +298,7 @@ function update(dt) {
     nextPickup = spawnGap();
     if (pickups.length < maxOnBoard()) {
       const i = Math.floor(rand(0, COLS)), j = Math.floor(rand(0, ROWS));
-      pickups.push({ x: i + .5, y: j + .5, type: KEYS[Math.floor(Math.random() * KEYS.length)], born: time });
+      pickups.push({ x: i + .5, y: j + .5, type: KEYS[Math.floor(rng() * KEYS.length)], born: time });
     }
   }
 
@@ -301,9 +310,8 @@ function update(dt) {
   for (let t = 1; t < nTeams; t++) if (counts[t] > counts[lead]) lead = t;
   if (counts[lead] / owner.length >= TARGET || alive === 1) {
     over = true;
-    const pct = Math.round(counts[lead] / owner.length * 100);
-    winInfo = { team: lead, t: 0, sub: alive === 1 ? `last team standing · ${fmt(time)}` : `${pct}% of the board · ${fmt(time)}` };
-    onWin();
+    winInfo = { team: lead, t: 0, sub: fmt(time) };
+    sfx("win", lead);
   }
 }
 
@@ -333,7 +341,7 @@ function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x
 
 function drawHeader() {
   text("Turf Pong", BX, 150, "700 44px Manrope, system-ui, sans-serif", CV.fg, "left", -1);
-  text(`first to 85%  ·  ${fmt(time)}`, BX + BW, 150, "400 30px 'DM Mono', ui-monospace, monospace", CV.dim, "right");
+  text(fmt(time), BX + BW, 150, "400 30px 'DM Mono', ui-monospace, monospace", CV.dim, "right");
 }
 
 // slim strip: one segment per team — name, share, and tiny power-up rings
@@ -427,7 +435,6 @@ function drawFooter() {
     text(rest, x0 + wn, BY + BH + 84, "500 40px Manrope, system-ui, sans-serif", CV.fg);
     ctx.globalAlpha = 1;
   }
-  text("ankorlabs.com", W / 2, BY + BH + 150, "400 26px 'DM Mono', ui-monospace, monospace", CV.dim, "center", 1);
 }
 
 function draw() {
@@ -435,16 +442,69 @@ function draw() {
   drawHeader(); drawStrip(); drawBoard(); drawFooter();
 }
 
-// ---------- recording ----------
-// Renders the game frame by frame (30 fps, 1080×1920 H.264 MP4) instead of capturing the screen,
+// ---------- sound ----------
+// Small synthesized sounds: a note per block hit (each team has its own key), a chime per power-up,
+// a thump for Bomb / Laser / Quake, and a short tune for the win. The same sounds go into recorded videos.
+const SCALE = [0, 2, 4, 7, 9, 12, 14];
+const ROOTS = [523.25, 392.0, 659.25, 440.0];
+let actx = null, liveOut = null, soundOn = true, noteStep = 0, recEvents = null, recClock = 0;
+const lastHit = [0, 0, 0, 0].map(() => -1);
+const clockNow = () => recEvents ? recClock : performance.now() / 1000;
+
+function sfx(type, team) {
+  const t = clockNow();
+  if (type === "hit") { if (t - lastHit[team] < 0.06) return; lastHit[team] = t; }
+  const ev = { type, team, t, note: SCALE[(noteStep++ * 3) % SCALE.length] };
+  if (recEvents) { recEvents.push(ev); return; }
+  if (soundOn && actx && actx.state === "running") play(actx, liveOut, ev, actx.currentTime + 0.01);
+}
+function makeOut(ctx) {
+  const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 4;
+  const g = ctx.createGain(); g.gain.value = 0.85; comp.connect(g); g.connect(ctx.destination); return comp;
+}
+function tone(ctx, out, when, freq, type, peak, decay, toFreq) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, when);
+  if (toFreq) o.frequency.exponentialRampToValueAtTime(toFreq, when + decay);
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(peak, when + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + decay);
+  o.connect(g); g.connect(out); o.start(when); o.stop(when + decay + 0.03);
+}
+function play(ctx, out, ev, when) {
+  const root = ROOTS[ev.team % 4], f = st => root * Math.pow(2, st / 12);
+  switch (ev.type) {
+    case "hit": tone(ctx, out, when, f(ev.note), "triangle", 0.08, 0.12); break;
+    case "power":
+      tone(ctx, out, when, f(12), "sine", 0.16, 0.22);
+      tone(ctx, out, when + 0.07, f(19), "sine", 0.14, 0.32);
+      tone(ctx, out, when + 0.07, f(24), "triangle", 0.04, 0.28);
+      break;
+    case "boom":
+      tone(ctx, out, when, 180, "sine", 0.5, 0.5, 42);
+      tone(ctx, out, when + 0.02, f(12), "sine", 0.1, 0.3);
+      break;
+    case "win": [0, 4, 7, 12, 16].forEach((st, i) => tone(ctx, out, when + i * 0.12, f(st), "triangle", 0.16, 0.7)); break;
+  }
+}
+function wakeAudio() { // browsers only allow sound after a click or key press
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  if (!actx) { actx = new AC(); liveOut = makeOut(actx); }
+  if (actx.state === "suspended") actx.resume();
+}
+document.addEventListener("pointerdown", wakeAudio);
+document.addEventListener("keydown", wakeAudio);
+
+// ---------- video making ----------
+// Renders the game frame by frame (30 fps, 1080×1920 H.264 + AAC sound, MP4) instead of capturing the screen,
 // so the video is smooth on any computer and finishes faster than real time.
-const FPS = 30, MAX_SECONDS = 180, END_HOLD = 3.5;
+const FPS = 30, MAX_SECONDS = 180, END_HOLD = 3.5, SR = 48000;
 let rendering = false, cancelRender = false, saveUrl = null;
 const msg = t => { $("recMsg").textContent = t; };
-const stamp = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
-function onWin() {}
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
-async function pickCodec() {
+async function pickVideoCodec() {
   if (!window.VideoEncoder || !window.Mp4Muxer) return null;
   for (const codec of ["avc1.640028", "avc1.4d0028", "avc1.42003e"]) {
     const cfg = { codec, width: W, height: H, bitrate: 8_000_000, framerate: FPS };
@@ -452,23 +512,65 @@ async function pickCodec() {
   }
   return null;
 }
+async function pickAudioCodec() {
+  if (!window.AudioEncoder || !window.OfflineAudioContext) return null;
+  const cfg = { codec: "mp4a.40.2", sampleRate: SR, numberOfChannels: 2, bitrate: 128000 };
+  try { if ((await AudioEncoder.isConfigSupported(cfg)).supported) return cfg; } catch (e) {}
+  return null;
+}
+async function renderSound(events, seconds) {
+  const oc = new OfflineAudioContext(2, Math.ceil(seconds * SR), SR), out = makeOut(oc);
+  for (const ev of events) if (ev.t < seconds - 0.05) play(oc, out, ev, ev.t + 0.001);
+  return oc.startRendering();
+}
+async function encodeSound(buf, muxer, cfg) {
+  let err = null;
+  const enc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: e => { err = e; } });
+  enc.configure(cfg);
+  const L = buf.getChannelData(0), R = buf.getChannelData(1), block = 1024;
+  for (let i = 0; i < buf.length && !err; i += block) {
+    const n = Math.min(block, buf.length - i), data = new Float32Array(n * 2);
+    data.set(L.subarray(i, i + n), 0); data.set(R.subarray(i, i + n), n);
+    const ad = new AudioData({ format: "f32-planar", sampleRate: SR, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(i * 1e6 / SR), data });
+    enc.encode(ad); ad.close();
+  }
+  await enc.flush(); enc.close();
+  if (err) throw err;
+}
 
-async function recordGame() {
-  const cfg = await pickCodec();
-  if (!cfg) { msg("This browser can't make videos. Use Chrome or Edge on a computer."); return; }
-  if (saveUrl) { URL.revokeObjectURL(saveUrl); saveUrl = null; }
-  $("save").hidden = true;
+function applyOptions(o) {
+  if (o.teams) { nTeams = Math.max(2, Math.min(4, +o.teams | 0)); press("gTeams", $("t" + nTeams)); }
+  if (o.speed) { speedMult = [1, 2, 4].includes(+o.speed) ? +o.speed : 1; press("gSpeed", $("s" + speedMult)); }
+  if (o.powerups !== undefined) { powersOn = !(o.powerups === false || o.powerups === "0" || o.powerups === 0); $("pw").setAttribute("aria-pressed", powersOn); }
+}
+
+// Makes one full game as an MP4. Options: { teams: 2-4, speed: 1|2|4, seed: any text, powerups: true|false }.
+// Returns { blob, filename, winner, winnerShare, teams, seed, seconds, hasSound }.
+async function makeVideo(opts = {}, onProgress = () => {}) {
+  if (rendering) throw new Error("Already making a video");
+  applyOptions(opts);
+  const vcfg = await pickVideoCodec();
+  if (!vcfg) throw new Error("This browser can't make videos. Use Chrome or Edge on a computer.");
+  const acfg = await pickAudioCodec();
+  if (document.fonts) { try { await document.fonts.ready; } catch (e) {} }
+  const seed = String(opts.seed ?? `${today()}-${Math.floor(Math.random() * 1e6)}`);
   rendering = true; cancelRender = false;
-  $("rec").classList.add("on"); $("rec").textContent = "Cancel";
-  const muxer = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: "avc", width: W, height: H }, fastStart: "in-memory" });
+  const muxer = new Mp4Muxer.Muxer({
+    target: new Mp4Muxer.ArrayBufferTarget(),
+    video: { codec: "avc", width: W, height: H },
+    ...(acfg ? { audio: { codec: "aac", numberOfChannels: 2, sampleRate: SR } } : {}),
+    fastStart: "in-memory",
+  });
   let failed = null;
   const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { failed = e; } });
-  enc.configure(cfg);
-  reset();
+  enc.configure(vcfg);
+  seedRandom(seed); reset(); noteStep = 0; lastHit.fill(-1);
+  recEvents = [];
   const dt = speedMult / FPS;
   let frame = 0, holdFrames = 0;
   try {
     while (!cancelRender && !failed) {
+      recClock = frame / FPS;
       if (over) update(1 / FPS); else update(dt); // win screen animates at normal speed
       draw();
       const vf = new VideoFrame(cv, { timestamp: Math.round(frame * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
@@ -478,32 +580,89 @@ async function recordGame() {
       if (over && ++holdFrames >= END_HOLD * FPS) break; // keep the winner on screen for 3.5 real seconds
       if (frame >= FPS * MAX_SECONDS) break;
       if (frame % 15 === 0) {
-        msg(`Making video… ${fmt(frame / FPS)}`);
+        onProgress(frame / FPS);
         while (enc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 5));
-        await new Promise(r => setTimeout(r, 0)); // let the page repaint
+        await new Promise(r => setTimeout(r, 0));
       }
     }
     if (failed) throw failed;
-    if (cancelRender) { enc.close(); msg("Cancelled."); return; }
-    await enc.flush();
+    if (cancelRender) { enc.close(); throw new Error("Cancelled"); }
+    await enc.flush(); enc.close();
+    const seconds = frame / FPS;
+    if (acfg) { onProgress(seconds, "Adding sound…"); await encodeSound(await renderSound(recEvents, seconds), muxer, acfg); }
     muxer.finalize();
     const blob = new Blob([muxer.target.buffer], { type: "video/mp4" });
-    saveUrl = URL.createObjectURL(blob);
-    const a = $("save");
-    a.href = saveUrl; a.download = `turf-pong-${stamp()}.mp4`;
-    a.hidden = false; a.textContent = `Save video (${(blob.size / 1e6).toFixed(1)} MB)`;
-    msg(`Done · ${fmt(frame / FPS)} long`);
-    try { a.click(); } catch (e) {}
+    const win = winInfo ? winInfo.team : counts.indexOf(Math.max(...counts));
+    return {
+      blob, filename: `turf-pong-${seed}.mp4`.replace(/[^\w.-]+/g, "-"),
+      winner: TEAMS[win].name, winnerShare: Math.round(counts[win] / owner.length * 100),
+      teams: TEAMS.slice(0, nTeams).map((T, t) => ({ name: T.name, share: Math.round(counts[t] / owner.length * 100) })),
+      seed, seconds: Math.round(seconds * 10) / 10, hasSound: !!acfg, finished: !!winInfo,
+    };
   } catch (e) {
-    msg("Video failed: " + (e && e.message ? e.message : e));
     try { enc.close(); } catch (_) {}
+    throw e;
   } finally {
-    rendering = false;
-    $("rec").classList.remove("on"); $("rec").textContent = "Record a game";
+    rendering = false; recEvents = null; rng = Math.random;
     last = performance.now();
   }
 }
-$("rec").onclick = () => rendering ? (cancelRender = true) : recordGame();
+
+const toBase64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
+
+function offerFile(result) {
+  if (saveUrl) URL.revokeObjectURL(saveUrl);
+  saveUrl = URL.createObjectURL(result.blob);
+  const a = $("save");
+  a.href = saveUrl; a.download = result.filename;
+  a.hidden = false; a.textContent = `Save video (${(result.blob.size / 1e6).toFixed(1)} MB)`;
+  try { a.click(); } catch (e) {}
+}
+
+$("rec").onclick = async () => {
+  if (rendering) { cancelRender = true; return; }
+  $("save").hidden = true;
+  $("rec").classList.add("on"); $("rec").textContent = "Cancel";
+  try {
+    const r = await makeVideo({}, (s, note) => msg(note || `Making video… ${fmt(s)}`));
+    offerFile(r);
+    msg(`Done · ${fmt(r.seconds)} · ${r.winner} wins${r.hasSound ? "" : " · no sound in this browser"}`);
+  } catch (e) {
+    msg(e.message === "Cancelled" ? "Cancelled." : "Video failed: " + (e.message || e));
+  } finally {
+    $("rec").classList.remove("on"); $("rec").textContent = "Record a game";
+  }
+};
+
+// For an AI agent or script: window.TurfPong.makeVideo({...}) resolves to the result plus mp4Base64.
+// Or open the page with ?agent=1&teams=3&speed=1&seed=2026-11-12 and it makes the video by itself,
+// saves the file, writes the result into <script id="agent-result" type="application/json">,
+// and sets the tab title to TURF-PONG-DONE (or TURF-PONG-FAILED).
+window.TurfPong = {
+  version: 1,
+  async makeVideo(opts = {}) { const r = await makeVideo(opts); return { ...r, blob: undefined, mp4Base64: await toBase64(r.blob) }; },
+};
+async function runAgentMode(q) {
+  const out = document.createElement("script");
+  out.type = "application/json"; out.id = "agent-result";
+  try {
+    msg("Agent mode: making today's video…");
+    const r = await makeVideo({ teams: q.get("teams"), speed: q.get("speed"), seed: q.get("seed") || today(), powerups: q.get("powerups") ?? undefined },
+      (s, note) => msg(note || `Agent mode: making video… ${fmt(s)}`));
+    const meta = { ok: true, ...r, blob: undefined, bytes: r.blob.size };
+    if (q.get("base64") !== "0") meta.mp4Base64 = await toBase64(r.blob);
+    out.textContent = JSON.stringify(meta);
+    document.body.appendChild(out);
+    if (q.get("download") !== "0") offerFile(r);
+    msg(`Agent mode: done · ${r.winner} wins`);
+    document.title = "TURF-PONG-DONE";
+  } catch (e) {
+    out.textContent = JSON.stringify({ ok: false, error: String(e && e.message || e) });
+    document.body.appendChild(out);
+    msg("Agent mode failed: " + (e.message || e));
+    document.title = "TURF-PONG-FAILED";
+  }
+}
 
 // ---------- controls ----------
 function resize() {
@@ -516,6 +675,7 @@ const press = (grp, btn) => document.querySelectorAll(`#${grp} button`).forEach(
 [1, 2, 4].forEach(n => $("s" + n).onclick = e => { speedMult = n; press("gSpeed", e.currentTarget); });
 $("pw").onclick = e => { powersOn = !powersOn; e.currentTarget.setAttribute("aria-pressed", powersOn); if (!powersOn) pickups = []; };
 $("restart").onclick = reset;
+$("snd").onclick = e => { soundOn = !soundOn; e.currentTarget.setAttribute("aria-pressed", soundOn); if (soundOn) wakeAudio(); };
 cv.onclick = () => { if (over && !rendering) reset(); };
 [..."t2 t3 t4 restart".split(" ")].forEach(id => $(id).addEventListener("click", e => { if (rendering) e.stopImmediatePropagation(); }, true));
 press("gTeams", $("t2")); press("gSpeed", $("s1"));
@@ -535,6 +695,7 @@ function loop(now) {
 }
 reset(); resize();
 requestAnimationFrame(loop);
+{ const q = new URLSearchParams(location.search); if (q.get("agent") === "1") runAgentMode(q); }
 })();
 </script>
 
