@@ -1,0 +1,465 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<title>Ankor Labs - Turf Pong</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one quiet column — status line, seamless pastel board, one stacked share bar, text controls */
+:root {
+  color-scheme: dark;
+  --bg: #0b0d10;
+  --fg: #e8eaed;
+  --dim: #a5aab1;
+  --line: #30343b;
+  --sans: "Manrope", system-ui, -apple-system, sans-serif;
+  --mono: "DM Mono", ui-monospace, Menlo, monospace;
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--sans);
+  display: flex; flex-direction: column; align-items: center; overflow: hidden; box-sizing: border-box; margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 20px;
+}
+.site-header { width: 100%; max-width: 72rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; flex-wrap: wrap; min-height: 5rem; border-bottom: 1px solid var(--line); margin-bottom: 16px; flex: none; }
+.brand { display: inline-flex; align-items: center; gap: .6rem; text-decoration: none; font-size: 1.2rem; letter-spacing: -.04em; font-weight: 600; color: var(--fg); }
+.brand svg { width: 40px; height: 40px; flex: none; }
+.main-nav { display: flex; flex-wrap: wrap; gap: .5rem 1.6rem; font: .875rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.main-nav a { color: var(--fg); text-decoration: none; min-height: 2.2rem; display: inline-flex; align-items: center; }
+.main-nav a:hover { color: var(--dim); }
+.main-nav a[aria-current="page"] { text-decoration: underline; text-underline-offset: .55em; }
+.col { min-height: 0; flex: 1; }
+@media (max-width: 44rem) { .site-header { padding-block: .75rem; min-height: 0; } .brand { flex-basis: 100%; } .main-nav { gap: .25rem 1rem; } }
+.col { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 480px; height: 100%; min-height: 0; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+h1 { font-size: 15px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.status { font-family: var(--mono); font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
+.event { font-family: var(--mono); font-size: 12px; height: 16px; color: var(--dim); transition: opacity .4s; }
+.stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; position: relative; }
+canvas { display: block; border-radius: 6px; }
+.win {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent); backdrop-filter: blur(3px);
+  animation: fade .5s ease;
+}
+.win[hidden] { display: none; }
+.win .who { font-size: clamp(30px, 9vw, 44px); font-weight: 700; letter-spacing: -0.03em; }
+.win .how { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+@keyframes fade { from { opacity: 0; } }
+.share { display: flex; flex-direction: column; gap: 8px; }
+.bar { height: 6px; display: flex; position: relative; background: var(--line); border-radius: 3px; }
+.bar .seg { height: 100%; transition: width .25s linear; }
+.bar .seg:first-child { border-radius: 3px 0 0 3px; }
+.bar .seg:last-of-type { border-radius: 0 3px 3px 0; }
+.bar .mark { position: absolute; top: -4px; bottom: -4px; width: 2px; left: calc(85% - 1px); background: var(--fg); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; }
+.legend div { display: flex; align-items: center; gap: 6px; }
+.legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.legend b { font-family: var(--mono); font-weight: 400; color: var(--dim); font-variant-numeric: tabular-nums; }
+.legend .out { opacity: .35; text-decoration: line-through; }
+.controls { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12px; align-items: center; border-top: 1px solid var(--line); padding-top: 12px; }
+.grp { display: flex; gap: 2px; align-items: center; }
+.grp span { color: var(--dim); margin-right: 6px; }
+button { font: inherit; background: none; border: 0; color: var(--dim); padding: 3px 5px; cursor: pointer; border-radius: 4px; }
+button:hover { color: var(--fg); }
+button[aria-pressed="true"] { color: var(--fg); font-weight: 700; }
+button:focus-visible { outline: 1.5px solid var(--fg); }
+#restart { margin-left: auto; color: var(--fg); }
+#again { color: var(--fg); border: 1px solid var(--fg); border-radius: 999px; padding: 6px 16px; margin-top: 6px; }
+details { font-size: 12px; color: var(--dim); }
+summary { cursor: pointer; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+.pw { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 14px; margin-top: 8px; max-height: 120px; overflow-y: auto; }
+.pw div { display: flex; gap: 8px; align-items: baseline; }
+.pw code { font-family: var(--mono); color: var(--fg); width: 12px; text-align: center; flex: none; }
+.pw b { color: var(--fg); font-weight: 500; }
+.teams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tm { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 7px 10px; border-radius: 8px; background: color-mix(in srgb, var(--line) 55%, transparent); }
+.tm .h { display: flex; gap: 6px; align-items: center; font-size: 12px; font-weight: 700; }
+.tm .h i { width: 8px; height: 8px; border-radius: 50%; }
+.tm .h b { margin-left: auto; font-family: var(--mono); font-weight: 400; color: var(--dim); font-variant-numeric: tabular-nums; }
+.tm.out { opacity: .35; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; height: 44px; overflow: hidden; align-content: flex-start; }
+.chip { position: relative; display: inline-flex; gap: 4px; align-items: center; font-size: 11px; line-height: 1; padding: 4px 7px 5px; border-radius: 999px; color: #2a2b30; overflow: hidden; white-space: nowrap; }
+.chip code { font-family: var(--mono); font-weight: 500; }
+.chip i { position: absolute; left: 0; bottom: 0; height: 2px; background: rgba(0,0,0,.35); }
+.chip.neg { background: transparent !important; color: var(--fg); box-shadow: inset 0 0 0 1px var(--dim); }
+.chip.pop { animation: pop .3s ease; }
+@keyframes pop { from { transform: scale(1.25); } }
+.none { font-size: 11px; color: var(--dim); line-height: 20px; }
+@media (prefers-reduced-motion: reduce) { .win, .chip.pop { animation: none; } }
+</style></head><body>
+
+<header class="site-header"><a class="brand" href="index.html"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <g fill="none" stroke="#e8eaed" stroke-width="53.25">
+    <circle cx="512" cy="409.6" r="148.48"/>
+    <line x1="276.48" y1="701.44" x2="747.52" y2="701.44"/>
+  </g>
+</svg>
+<span>Ankor Labs<span>.</span></span></a><nav class="main-nav" aria-label="Main navigation"><a href="index.html#contact">Contact</a><a href="index.html#room-tool">Room List Formatter</a><a href="turf-pong.html" aria-current="page">Turf Pong</a><a href="https://ankor-date-spots.s338789033.workers.dev/">Date Spots</a><a href="https://ankor-date-spots.s338789033.workers.dev/admin">Admin</a></nav></header>
+<div class="col">
+  <div class="top"><h1>Turf Pong</h1><div class="status" id="status"></div></div>
+  <div class="teams" id="teams"></div>
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="win" id="win" hidden><div class="who" id="who"></div><div class="how" id="how"></div><button id="again">Play again</button></div>
+  </div>
+  <div class="event" id="event"></div>
+  <div class="share">
+    <div class="bar" id="bar"></div>
+    <div class="legend" id="legend"></div>
+  </div>
+  <div class="controls">
+    <div class="grp" id="gTeams"><span>Teams</span><button id="t2">2</button><button id="t3">3</button><button id="t4">4</button></div>
+    <div class="grp" id="gSpeed"><span>Speed</span><button id="s1">1×</button><button id="s2">2×</button><button id="s4">4×</button></div>
+    <div class="grp"><button id="pw" aria-pressed="true">Power-ups</button></div>
+    <button id="restart">Restart</button>
+  </div>
+  <details><summary>Power-ups ›</summary><div class="pw" id="pwList"></div></details>
+</div>
+
+<script>
+(() => {
+const COLS = 20, ROWS = 26, BASE_SPEED = 20, TARGET = 0.85;
+const TEAMS = [
+  { name: "Butter", tile: "#f7dc8f", ball: "#c99a1e" },
+  { name: "Sky",    tile: "#a9cdee", ball: "#3f7fbf" },
+  { name: "Rose",   tile: "#f4a3a0", ball: "#cc4f4a" },
+  { name: "Peony",  tile: "#efb8dc", ball: "#b9549a" },
+];
+const POWERS = {
+  nitro:  { label: "Nitro",      g: "N", dur: 7,   desc: "2.2× speed for 7s" },
+  wreck:  { label: "Wrecker",    g: "W", dur: 5,   desc: "plows through tiles for 5s" },
+  giant:  { label: "Giant",      g: "G", dur: 8,   desc: "2.5× size for 8s" },
+  split:  { label: "Split",      g: "S", dur: 10,  desc: "two extra balls for 10s" },
+  fort:   { label: "Fortify",    g: "+", dur: 0,   desc: "border tiles take 3 hits" },
+  bomb:   { label: "Bomb",       g: "B", dur: 0,   desc: "claims a wide blast circle" },
+  freeze: { label: "Freeze",     g: "F", dur: 4,   desc: "rival balls stop for 4s" },
+  laser:  { label: "Laser",      g: "L", dur: 0,   desc: "claims its row and column" },
+  shield: { label: "Shield",     g: "H", dur: 5,   desc: "own turf untouchable for 5s" },
+  magnet: { label: "Magnet",     g: "M", dur: 8,   desc: "pulls power-ups in for 8s" },
+  quake:  { label: "Quake",      g: "Q", dur: 0,   desc: "border pushes out 2 tiles" },
+  mirror: { label: "Mirror",     g: "R", dur: 0,   desc: "copies the last rival power-up" },
+  steal:  { label: "Steal",      g: "$", dur: 0,   desc: "takes rivals' boosts and extra balls" },
+};
+const KEYS = Object.keys(POWERS);
+const SPAWNABLE = KEYS;
+
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+let nTeams = 2, speedMult = 1, powersOn = true;
+let owner, hp, flash, balls, pickups, time, nextPickup, over, counts, alive, shield, frozen, lastPower, recent, cs = 16, eventTimer = 0;
+let colors = {};
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const idx = (i, j) => j * COLS + i;
+const inB = (i, j) => i >= 0 && j >= 0 && i < COLS && j < ROWS;
+const mix = (hex, w, t) => {
+  const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  const m = c => Math.round(c + (w - c) * t);
+  return `rgb(${m(r)},${m(g)},${m(b)})`;
+};
+function readColors() {
+  const s = getComputedStyle(document.documentElement);
+  colors = { bg: s.getPropertyValue("--bg").trim(), fg: s.getPropertyValue("--fg").trim() };
+}
+
+function fixAngle(b) {
+  let a = Math.atan2(b.dy, b.dx) + rand(-0.06, 0.06);
+  b.dx = Math.cos(a); b.dy = Math.sin(a);
+  if (Math.abs(b.dx) < 0.35) b.dx = 0.35 * Math.sign(b.dx || 1);
+  if (Math.abs(b.dy) < 0.35) b.dy = 0.35 * Math.sign(b.dy || 1);
+  const m = Math.hypot(b.dx, b.dy); b.dx /= m; b.dy /= m;
+}
+function newBall(team, x, y, temp = 0) {
+  const a = rand(0, Math.PI * 2);
+  const b = { team, x, y, dx: Math.cos(a), dy: Math.sin(a), r: 0.4, nitro: 0, wreck: 0, giant: 0, magnet: 0, temp, trail: [] };
+  fixAngle(b); return b;
+}
+
+function reset() {
+  owner = new Int8Array(COLS * ROWS); hp = new Uint8Array(COLS * ROWS); flash = new Float32Array(COLS * ROWS);
+  shield = new Array(nTeams).fill(0); frozen = new Array(nTeams).fill(0); lastPower = null;
+  recent = Array.from({ length: nTeams }, () => []);
+  const cx = COLS / 2, cy = ROWS / 2, sums = Array.from({ length: nTeams }, () => ({ x: 0, y: 0, n: 0 }));
+  for (let j = 0; j < ROWS; j++) for (let i = 0; i < COLS; i++) {
+    let t;
+    if (nTeams === 2) t = j < ROWS / 2 ? 0 : 1;
+    else if (nTeams === 4) t = (j < cy ? 0 : 2) + (i < cx ? 0 : 1);
+    else {
+      const ang = Math.atan2(j + .5 - cy, i + .5 - cx) + Math.PI / 2;
+      t = Math.floor(((ang + Math.PI * 2) % (Math.PI * 2)) / (Math.PI * 2 / 3)) % 3;
+    }
+    owner[idx(i, j)] = t; sums[t].x += i + .5; sums[t].y += j + .5; sums[t].n++;
+  }
+  balls = sums.map((s, t) => newBall(t, s.x / s.n, s.y / s.n));
+  pickups = []; time = 0; nextPickup = 2; over = false;
+  $("win").hidden = true; $("event").textContent = "";
+  buildShare(); tally();
+}
+
+function buildShare() {
+  $("bar").innerHTML = TEAMS.slice(0, nTeams).map((T, t) => `<div class="seg" id="seg${t}" style="background:${T.tile}"></div>`).join("") + `<div class="mark"></div>`;
+  $("legend").innerHTML = TEAMS.slice(0, nTeams).map((T, t) => `<div id="lg${t}"><i style="background:${T.tile}"></i><span>${T.name}</span><b id="pc${t}">0%</b></div>`).join("");
+  $("teams").style.gridTemplateColumns = `repeat(${nTeams === 3 ? 3 : 2}, minmax(0, 1fr))`;
+  $("teams").innerHTML = TEAMS.slice(0, nTeams).map((T, t) => `<div class="tm" id="tm${t}"><div class="h"><i style="background:${T.ball}"></i>${T.name}<b id="tp${t}"></b></div><div class="chips" id="ch${t}"></div></div>`).join("");
+  chipKeys = new Array(nTeams).fill(null);
+}
+
+// what each team has active right now, for the panel above the board
+let chipKeys = [];
+function teamEffects(t) {
+  const fx = [], mine = balls.filter(b => b.team === t);
+  for (const k of ["nitro", "wreck", "giant", "magnet"]) {
+    const m = Math.max(0, ...mine.map(b => b[k]));
+    if (m > 0) fx.push({ k, p: m / POWERS[k].dur });
+  }
+  const extra = mine.filter(b => b.temp > 0);
+  if (extra.length) fx.push({ k: "split", p: Math.max(...extra.map(b => b.temp)) / POWERS.split.dur, label: `Split ×${extra.length}` });
+  if (shield[t] > 0) fx.push({ k: "shield", p: shield[t] / POWERS.shield.dur });
+  let forts = 0; for (let c = 0; c < owner.length; c++) if (owner[c] === t && hp[c] > 0) forts++;
+  if (forts) fx.push({ k: "fort", p: 1, label: `Fortify ${forts}`, still: true });
+  if (frozen[t] > 0) fx.push({ k: "freeze", p: frozen[t] / POWERS.freeze.dur, label: "Frozen", neg: true });
+  for (const r of recent[t]) fx.push({ k: r.k, p: r.left / 2, label: r.label });
+  return fx;
+}
+function renderTeams() {
+  for (let t = 0; t < nTeams; t++) {
+    const fx = teamEffects(t), T = TEAMS[t], box = $("ch" + t);
+    $("tp" + t).textContent = Math.round(counts[t] / owner.length * 100) + "%";
+    $("tm" + t).classList.toggle("out", counts[t] === 0);
+    const key = fx.map(f => f.k + (f.label || "")).join(",");
+    if (key !== chipKeys[t]) { // rebuild only when the set changes, so new chips can pop in
+      const prev = (chipKeys[t] || "").split(",");
+      box.innerHTML = fx.length ? fx.map(f => `<span class="chip${f.neg ? " neg" : ""}${prev.includes(f.k + (f.label || "")) ? "" : " pop"}" style="background:${T.tile}"><code>${POWERS[f.k].g}</code>${f.label || POWERS[f.k].label}<i></i></span>`).join("") : `<span class="none">No power-ups</span>`;
+      chipKeys[t] = key;
+    }
+    box.querySelectorAll(".chip i").forEach((el, n) => { const f = fx[n]; el.style.width = f.still ? "0" : Math.max(0, Math.min(1, f.p)) * 100 + "%"; });
+  }
+}
+
+function announce(text) { $("event").textContent = text; $("event").style.opacity = 1; eventTimer = 2.5; }
+
+function claim(c, team, force) {
+  if (owner[c] === team) return;
+  if (!force && shield[owner[c]] > 0) { flash[c] = 0.3; return; }
+  if (!force && hp[c] > 0) { hp[c]--; flash[c] = 0.5; return; }
+  owner[c] = team; hp[c] = 0; flash[c] = 1;
+}
+
+const N4 = [[1,0],[-1,0],[0,1],[0,-1]];
+function borderOf(t, enemy) { // cells next to team t's turf; enemy=true -> rival cells, false -> own cells
+  const out = [];
+  for (let c = 0; c < owner.length; c++) {
+    if ((owner[c] === t) === enemy) continue;
+    const i = c % COLS, j = (c / COLS) | 0;
+    if (N4.some(([a, d]) => inB(i + a, j + d) && (owner[idx(i + a, j + d)] === t) === enemy)) out.push(c);
+  }
+  return out;
+}
+
+function applyPower(b, type, mirrored) {
+  const P = POWERS[type], t = b.team;
+  switch (type) {
+    case "split": balls.push(newBall(t, b.x, b.y, P.dur), newBall(t, b.x, b.y, P.dur)); break;
+    case "fort": for (const c of borderOf(t, false)) { hp[c] = 3; flash[c] = 0.4; } break;
+    case "bomb":
+      for (let j = 0; j < ROWS; j++) for (let i = 0; i < COLS; i++)
+        if (Math.hypot(i + .5 - b.x, j + .5 - b.y) <= 4.3) claim(idx(i, j), t, true);
+      break;
+    case "laser": {
+      const ci = Math.min(COLS - 1, Math.floor(b.x)), cj = Math.min(ROWS - 1, Math.floor(b.y));
+      for (let i = 0; i < COLS; i++) claim(idx(i, cj), t, true);
+      for (let j = 0; j < ROWS; j++) claim(idx(ci, j), t, true);
+      break;
+    }
+    case "freeze": for (let o = 0; o < nTeams; o++) if (o !== t) frozen[o] = P.dur; break;
+    case "shield": shield[t] = P.dur; break;
+    case "quake": for (let k = 0; k < 2; k++) for (const c of borderOf(t, true)) claim(c, t, true); break;
+    case "mirror": {
+      const copy = lastPower && lastPower.team !== t ? lastPower.type : SPAWNABLE.filter(k => k !== "mirror")[Math.floor(Math.random() * (SPAWNABLE.length - 1))];
+      announce(`${TEAMS[t].name} · Mirror → ${POWERS[copy].label}`);
+      applyPower(b, copy, true); return;
+    }
+    case "steal": {
+      let took = 0;
+      for (const o of balls) {
+        if (o.team === t) continue;
+        for (const k of ["nitro", "wreck", "giant", "magnet"]) if (o[k] > 0) { b[k] = Math.max(b[k], o[k]) + 2; o[k] = 0; took++; }
+        if (o.temp > 0) { o.team = t; took++; }
+      }
+      for (let o = 0; o < nTeams; o++) if (o !== t && shield[o] > 0) { shield[t] = shield[o]; shield[o] = 0; took++; }
+      if (!took) { b.nitro = 5; b.giant = 5; } // nothing to take: keep a smaller prize
+      break;
+    }
+    default: b[type] = P.dur;
+  }
+  if (P.dur === 0 && type !== "fort") recent[t].push({ k: type, left: 2, label: mirrored ? `Mirror → ${P.label}` : P.label });
+  if (!mirrored) { lastPower = { team: t, type }; announce(`${TEAMS[t].name} · ${P.label}`); }
+}
+
+function stepBall(b, h) {
+  if (frozen[b.team] > 0) return;
+  const sp = BASE_SPEED * (b.nitro > 0 ? 2.2 : 1), r = b.r * (b.giant > 0 ? 2.5 : 1);
+  b.x += b.dx * sp * h; b.y += b.dy * sp * h;
+  if (b.x < r) { b.x = r; b.dx = Math.abs(b.dx); }
+  if (b.x > COLS - r) { b.x = COLS - r; b.dx = -Math.abs(b.dx); }
+  if (b.y < r) { b.y = r; b.dy = Math.abs(b.dy); }
+  if (b.y > ROWS - r) { b.y = ROWS - r; b.dy = -Math.abs(b.dy); }
+  const pts = b.giant > 0 ? 20 : 8;
+  let fx = false, fy = false;
+  for (let k = 0; k < pts; k++) {
+    const a = k * Math.PI * 2 / pts, ca = Math.cos(a), sa = Math.sin(a);
+    const i = Math.floor(b.x + ca * r), j = Math.floor(b.y + sa * r);
+    if (!inB(i, j)) continue;
+    const c = idx(i, j);
+    if (owner[c] === b.team) continue;
+    claim(c, b.team, false);
+    if (b.wreck > 0 && owner[c] === b.team) continue;
+    if (Math.abs(ca) > Math.abs(sa)) { if (!fx) { b.dx = -Math.sign(ca) * Math.abs(b.dx); fx = true; } }
+    else if (!fy) { b.dy = -Math.sign(sa) * Math.abs(b.dy); fy = true; }
+  }
+  if (fx || fy) fixAngle(b);
+  for (let p = pickups.length - 1; p >= 0; p--) {
+    const q = pickups[p];
+    if (b.magnet > 0) {
+      const dx = b.x - q.x, dy = b.y - q.y, d = Math.hypot(dx, dy);
+      if (d < 12 && d > 0.01) { q.x += dx / d * 9 * h; q.y += dy / d * 9 * h; }
+    }
+    if (Math.hypot(q.x - b.x, q.y - b.y) < r + 0.45) { pickups.splice(p, 1); applyPower(b, q.type); }
+  }
+}
+
+function tally() {
+  counts = new Array(nTeams).fill(0);
+  for (let c = 0; c < owner.length; c++) counts[owner[c]]++;
+  alive = counts.filter(n => n > 0).length;
+}
+
+// power-ups come faster and stack higher the longer a round runs
+const spawnGap = () => Math.max(0.3, 3 - time * 0.035);
+const maxOnBoard = () => Math.min(16, 3 + Math.floor(time / 8));
+
+function update(dt) {
+  if (over) return;
+  time += dt;
+  for (let t = 0; t < nTeams; t++) {
+    shield[t] = Math.max(0, shield[t] - dt); frozen[t] = Math.max(0, frozen[t] - dt);
+    recent[t] = recent[t].filter(r => (r.left -= dt) > 0);
+  }
+  const sub = Math.ceil(dt * BASE_SPEED * 2.2 / 0.2), h = dt / sub;
+  for (let s = 0; s < sub; s++) for (const b of balls.slice()) stepBall(b, h);
+  for (const b of balls) {
+    for (const k of ["nitro", "wreck", "giant", "magnet"]) if (b[k] > 0) b[k] -= dt;
+    if (b.temp > 0 && (b.temp -= dt) <= 0) b.dead = true;
+    b.trail.push([b.x, b.y]); if (b.trail.length > 8) b.trail.shift();
+  }
+  for (let c = 0; c < flash.length; c++) if (flash[c] > 0) flash[c] = Math.max(0, flash[c] - dt * 2.5);
+  if (eventTimer > 0 && (eventTimer -= dt) <= 0) $("event").style.opacity = 0;
+
+  if (powersOn && (nextPickup -= dt) <= 0) {
+    nextPickup = spawnGap();
+    if (pickups.length < maxOnBoard()) {
+      const i = Math.floor(rand(0, COLS)), j = Math.floor(rand(0, ROWS));
+      pickups.push({ x: i + .5, y: j + .5, type: SPAWNABLE[Math.floor(Math.random() * SPAWNABLE.length)], born: time });
+    }
+  }
+
+  tally();
+  for (const b of balls) if (counts[b.team] === 0) b.dead = true;
+  balls = balls.filter(b => !b.dead);
+  for (let t = 0; t < nTeams; t++) if (counts[t] === 0 && !$("lg" + t).classList.contains("out")) {
+    $("lg" + t).classList.add("out"); announce(`${TEAMS[t].name} is out`);
+  }
+  let lead = 0;
+  for (let t = 1; t < nTeams; t++) if (counts[t] > counts[lead]) lead = t;
+  if (counts[lead] / owner.length >= TARGET || alive === 1) win(lead);
+}
+
+function win(t) {
+  over = true;
+  const pct = Math.round(counts[t] / owner.length * 100);
+  $("who").textContent = `${TEAMS[t].name} wins`; $("who").style.color = TEAMS[t].ball;
+  $("how").textContent = alive === 1 ? `Last team standing · ${fmt(time)}` : `Took ${pct}% of the board · ${fmt(time)}`;
+  $("win").hidden = false;
+}
+const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+function draw() {
+  for (let j = 0; j < ROWS; j++) for (let i = 0; i < COLS; i++) {
+    const c = idx(i, j), o = owner[c], T = TEAMS[o], f = flash[c];
+    let col = T.tile;
+    if (shield[o] > 0) col = mix(T.tile, 255, 0.25 + 0.1 * Math.sin(time * 10));
+    else if (f > 0) col = mix(T.tile, 255, f * 0.6);
+    ctx.fillStyle = col; ctx.fillRect(i * cs, j * cs, cs + 0.5, cs + 0.5);
+    if (hp[c] > 0) {
+      ctx.fillStyle = mix(T.ball, 255, 0.35);
+      ctx.beginPath(); ctx.arc(i * cs + cs / 2, j * cs + cs / 2, cs * 0.07 * (1 + hp[c] * 0.4), 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  for (const p of pickups) {
+    const x = p.x * cs, y = p.y * cs, pulse = 1 + 0.08 * Math.sin((time - p.born) * 5);
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(x, y, cs * 0.46 * pulse, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#2a2b30"; ctx.font = `700 ${Math.floor(cs * 0.46)}px Manrope, system-ui, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(POWERS[p.type].g, x, y + 1);
+  }
+  for (const b of balls) {
+    const T = TEAMS[b.team], r = b.r * (b.giant > 0 ? 2.5 : 1) * cs, ice = frozen[b.team] > 0;
+    if (b.nitro > 0) b.trail.forEach(([x, y], k) => {
+      ctx.globalAlpha = (k / b.trail.length) * 0.35; ctx.fillStyle = T.ball;
+      ctx.beginPath(); ctx.arc(x * cs, y * cs, r * (k / b.trail.length), 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = ice ? "#ffffff" : T.ball;
+    ctx.beginPath(); ctx.arc(b.x * cs, b.y * cs, r, 0, Math.PI * 2); ctx.fill();
+    if (ice) { ctx.strokeStyle = T.ball; ctx.lineWidth = Math.max(1.5, cs * 0.1); ctx.stroke(); }
+    if (b.wreck > 0) { ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1.5, cs * 0.1); ctx.beginPath(); ctx.arc(b.x * cs, b.y * cs, r * 0.55, 0, Math.PI * 2); ctx.stroke(); }
+    if (b.magnet > 0) { ctx.strokeStyle = T.ball; ctx.globalAlpha = 0.35; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(b.x * cs, b.y * cs, r + cs * (0.4 + 0.2 * Math.sin(time * 8)), 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; }
+  }
+  for (let t = 0; t < nTeams; t++) {
+    const p = counts[t] / owner.length * 100;
+    $("seg" + t).style.width = p + "%"; $("pc" + t).textContent = Math.round(p) + "%";
+  }
+  renderTeams();
+  const rate = Math.round(3 / spawnGap() * 10) / 10;
+  $("status").textContent = over ? "" : `first to 85% · power-ups ${rate}× · ${fmt(time)}`;
+}
+
+function resize() {
+  readColors();
+  const st = $("stage").getBoundingClientRect();
+  cs = Math.max(6, Math.floor(Math.min(st.width / COLS, st.height / ROWS)));
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = COLS * cs * dpr; cv.height = ROWS * cs * dpr;
+  cv.style.width = COLS * cs + "px"; cv.style.height = ROWS * cs + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+const press = (grp, btn) => document.querySelectorAll(`#${grp} button`).forEach(b => b.setAttribute("aria-pressed", b === btn));
+[2, 3, 4].forEach(n => $("t" + n).onclick = e => { nTeams = n; press("gTeams", e.currentTarget); reset(); });
+[1, 2, 4].forEach(n => $("s" + n).onclick = e => { speedMult = n; press("gSpeed", e.currentTarget); });
+$("pw").onclick = e => { powersOn = !powersOn; e.currentTarget.setAttribute("aria-pressed", powersOn); if (!powersOn) pickups = []; };
+$("restart").onclick = reset; $("again").onclick = reset;
+press("gTeams", $("t2")); press("gSpeed", $("s1"));
+$("pwList").innerHTML = KEYS.map(k => `<div><code>${POWERS[k].g}</code><span><b>${POWERS[k].label}</b> ${POWERS[k].desc}</span></div>`).join("");
+
+window.addEventListener("resize", resize);
+if (window.ResizeObserver) new ResizeObserver(() => resize()).observe($("stage"));
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", readColors);
+new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  for (let k = 0; k < speedMult; k++) update(dt);
+  draw(); requestAnimationFrame(loop);
+}
+reset(); resize();
+if (document.fonts) document.fonts.ready.then(resize);
+requestAnimationFrame(loop);
+})();
+</script>
+
+</body></html>
