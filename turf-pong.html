@@ -42,8 +42,14 @@ details { font-size: 12px; color: var(--dim); }
 summary { cursor: pointer; list-style: none; }
 summary::-webkit-details-marker { display: none; }
 .pw { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 14px; margin-top: 8px; max-height: 110px; overflow-y: auto; }
-.pw div { display: flex; gap: 8px; align-items: baseline; }
-.pw code { font-family: var(--mono); color: var(--fg); width: 12px; text-align: center; flex: none; }
+.pw div { display: flex; gap: 8px; align-items: center; }
+.pw canvas { width: 16px; height: 16px; flex: none; border-radius: 0; box-shadow: none; cursor: default; }
+.cols { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; align-items: center; color: var(--dim); }
+.cols label { display: inline-flex; align-items: center; gap: 5px; }
+.cols label[hidden] { display: none; }
+.cols i { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 3px; cursor: pointer; }
+select:focus-visible { outline: 1.5px solid var(--fg); }
 .pw b { color: var(--fg); font-weight: 500; }
 </style>
 <style>
@@ -73,6 +79,7 @@ body { padding-block: 0 16px; }
     <div class="grp"><button id="pw" aria-pressed="true">Power-ups</button><button id="snd" aria-pressed="true">Sound</button></div>
     <button id="restart">Restart</button>
   </div>
+  <div class="cols" id="gCols"><span>Colours</span></div>
   <details><summary>Power-ups ›</summary><div class="pw" id="pwList"></div></details>
 </div>
 
@@ -82,26 +89,40 @@ const COLS = 20, ROWS = 26, BASE_SPEED = 20, TARGET = 0.85;
 // video frame (9:16) and where things sit inside it; kept clear of the Reels top bar and caption area
 const W = 1080, H = 1920, CELL = 48, BX = 60, BY = 300, BW = COLS * CELL, BH = ROWS * CELL;
 const CV = { bg: "#121317", fg: "#ecebe7", dim: "#7d7f87", ink: "#2a2b30" };
-const TEAMS = [
-  { name: "Butter", tile: "#f7dc8f", ball: "#c99a1e" },
-  { name: "Sky",    tile: "#a9cdee", ball: "#3f7fbf" },
-  { name: "Rose",   tile: "#f4a3a0", ball: "#cc4f4a" },
-  { name: "Peony",  tile: "#efb8dc", ball: "#b9549a" },
+const PALETTE = [
+  { name: "Butter",     tile: "#f7dc8f", ball: "#c99a1e" },
+  { name: "Sky",        tile: "#a9cdee", ball: "#3f7fbf" },
+  { name: "Rose",       tile: "#f4a3a0", ball: "#cc4f4a" },
+  { name: "Peony",      tile: "#efb8dc", ball: "#b9549a" },
+  { name: "Mint",       tile: "#a8e6c9", ball: "#2f9e6e" },
+  { name: "Lilac",      tile: "#cdb8f2", ball: "#7a55c7" },
+  { name: "Peach",      tile: "#fbc59a", ball: "#d9772b" },
+  { name: "Sage",       tile: "#c3d3a4", ball: "#6f8a3c" },
+  { name: "Aqua",       tile: "#9fe0e4", ball: "#2a98a3" },
+  { name: "Coral",      tile: "#ff9f85", ball: "#d9532f" },
+  { name: "Lime",       tile: "#d3ee9a", ball: "#7fa51f" },
+  { name: "Periwinkle", tile: "#b3bdf5", ball: "#4f5fcf" },
+  { name: "Sand",       tile: "#e6d3b3", ball: "#a37f45" },
+  { name: "Orchid",     tile: "#e3a6ee", ball: "#a140b5" },
+  { name: "Mist",       tile: "#c3ccd6", ball: "#5f7388" },
+  { name: "Cocoa",      tile: "#d9b8a6", ball: "#96604a" },
 ];
+let TEAMS = [];                    // the colours playing this game, one per team
+const choice = [-1, -1, -1, -1];   // colour picked for each team in the Colours row; -1 = random
 const POWERS = {
-  nitro:  { label: "Nitro",   g: "N", dur: 7,   desc: "2.2× speed for 7s" },
-  wreck:  { label: "Wrecker", g: "W", dur: 5,   desc: "plows through tiles for 5s" },
-  giant:  { label: "Giant",   g: "G", dur: 8,   desc: "2.5× size for 8s" },
-  split:  { label: "Split",   g: "S", dur: 10,  desc: "two extra balls for 10s" },
-  fort:   { label: "Fortify", g: "+", dur: 0,   desc: "border tiles take 3 hits" },
-  bomb:   { label: "Bomb",    g: "B", dur: 0,   desc: "claims a wide blast circle" },
-  freeze: { label: "Freeze",  g: "F", dur: 4,   desc: "rival balls stop for 4s" },
-  laser:  { label: "Laser",   g: "L", dur: 0,   desc: "claims its row and column" },
-  shield: { label: "Shield",  g: "H", dur: 5,   desc: "own turf untouchable for 5s" },
-  magnet: { label: "Magnet",  g: "M", dur: 8,   desc: "pulls power-ups in for 8s" },
-  quake:  { label: "Quake",   g: "Q", dur: 0,   desc: "border pushes out 2 tiles" },
-  mirror: { label: "Mirror",  g: "R", dur: 0,   desc: "copies the last rival power-up" },
-  steal:  { label: "Steal",   g: "$", dur: 0,   desc: "takes rivals' boosts and extra balls" },
+  nitro:  { label: "Nitro",   dur: 7,   desc: "2.2× speed for 7s" },
+  wreck:  { label: "Wrecker", dur: 5,   desc: "plows through tiles for 5s" },
+  giant:  { label: "Giant",   dur: 8,   desc: "2.5× size for 8s" },
+  split:  { label: "Split",   dur: 10,  desc: "two extra balls for 10s" },
+  fort:   { label: "Fortify", dur: 0,   desc: "border tiles take 3 hits" },
+  bomb:   { label: "Bomb",    dur: 0,   desc: "claims a wide blast circle" },
+  freeze: { label: "Freeze",  dur: 4,   desc: "rival balls stop for 4s" },
+  laser:  { label: "Laser",   dur: 0,   desc: "claims its row and column" },
+  shield: { label: "Shield",  dur: 5,   desc: "own turf untouchable for 5s" },
+  magnet: { label: "Magnet",  dur: 8,   desc: "pulls power-ups in for 8s" },
+  quake:  { label: "Quake",   dur: 0,   desc: "border pushes out 2 tiles" },
+  mirror: { label: "Mirror",  dur: 0,   desc: "copies the last rival power-up" },
+  steal:  { label: "Steal",   dur: 0,   desc: "takes rivals' boosts and extra balls" },
 };
 const KEYS = Object.keys(POWERS);
 
@@ -139,7 +160,34 @@ function newBall(team, x, y, temp = 0) {
   fixAngle(b); return b;
 }
 
+// Every game draws its colours at random from the palette (unless one was picked for a team),
+// re-drawing a few times so two look-alike pastels don't end up in the same game.
+function pickColours() {
+  let best = null, bestGap = -1;
+  for (let tries = 0; tries < 200 && bestGap < 70; tries++) {
+    const used = new Set(choice.slice(0, nTeams).filter(c => c >= 0)), set = [];
+    for (let t = 0; t < nTeams; t++) {
+      let c = choice[t];
+      if (c < 0) { do c = Math.floor(rng() * PALETTE.length); while (used.has(c)); used.add(c); }
+      set.push(c);
+    }
+    let gap = Infinity;
+    for (let a = 0; a < nTeams; a++) for (let b = a + 1; b < nTeams; b++) {
+      if (choice[a] >= 0 && choice[b] >= 0) continue;
+      const A = rgb(PALETTE[set[a]].tile), B = rgb(PALETTE[set[b]].tile);
+      gap = Math.min(gap, Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]));
+    }
+    if (gap > bestGap) { bestGap = gap; best = set; }
+  }
+  TEAMS = best.map(c => PALETTE[c]);
+  document.querySelectorAll("#gCols label").forEach((l, t) => {
+    l.hidden = t >= nTeams;
+    if (t < nTeams) l.firstChild.style.background = TEAMS[t].ball;
+  });
+}
+
 function reset() {
+  pickColours();
   owner = new Int8Array(COLS * ROWS); hp = new Uint8Array(COLS * ROWS); flash = new Float32Array(COLS * ROWS);
   shield = new Array(nTeams).fill(0); frozen = new Array(nTeams).fill(0); lastPower = null;
   recent = Array.from({ length: nTeams }, () => []); outs = new Array(nTeams).fill(false);
@@ -325,6 +373,68 @@ function text(str, x, y, font, color, align = "left", spacing = 0) {
 }
 function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); }
 
+// Power-up icons, drawn as shapes (no fonts or image files) so they look the same everywhere.
+// Each fits a box s wide, centred on x,y.
+function drawIcon(c, k, x, y, s, col) {
+  const TAU = Math.PI * 2;
+  const poly = (p, close) => { c.beginPath(); for (let i = 0; i < p.length; i += 2) c.lineTo(p[i], p[i + 1]); if (close) c.closePath(); };
+  const dot = (px, py, r) => { c.beginPath(); c.arc(px, py, r, 0, TAU); c.fill(); };
+  c.save(); c.translate(x, y); c.scale(s / 2, s / 2);
+  c.fillStyle = c.strokeStyle = col; c.lineWidth = 0.26; c.lineCap = c.lineJoin = "round";
+  switch (k) {
+    case "nitro": poly([0.25, -1, -0.7, 0.15, -0.08, 0.15, -0.25, 1, 0.7, -0.15, 0.08, -0.15], true); c.fill(); break;
+    case "wreck": c.rotate(Math.PI / 4); c.fillRect(-0.62, -0.9, 1.24, 0.6); c.fillRect(-0.14, -0.3, 0.28, 1.25); break;
+    case "giant": poly([-0.65, -0.05, 0, -0.7, 0.65, -0.05]); c.stroke(); poly([-0.65, 0.7, 0, 0.05, 0.65, 0.7]); c.stroke(); break;
+    case "split": dot(0, -0.52, 0.36); dot(-0.56, 0.42, 0.36); dot(0.56, 0.42, 0.36); break;
+    case "fort":
+      for (let r = 0; r < 3; r++) {
+        const y0 = -0.9 + r * 0.63, h = 0.54;
+        if (r % 2 === 0) { c.fillRect(-0.95, y0, 0.89, h); c.fillRect(0.06, y0, 0.89, h); }
+        else { c.fillRect(-0.95, y0, 0.4, h); c.fillRect(-0.43, y0, 0.86, h); c.fillRect(0.55, y0, 0.4, h); }
+      }
+      break;
+    case "bomb": dot(-0.12, 0.22, 0.68); poly([0.3, -0.28, 0.62, -0.62]); c.stroke(); dot(0.8, -0.8, 0.17); break;
+    case "freeze":
+      c.lineWidth = 0.19;
+      for (let a = 0; a < 3; a++) {
+        poly([0, -0.95, 0, 0.95]); c.stroke();
+        poly([-0.25, -0.93, 0, -0.62, 0.25, -0.93]); c.stroke();
+        poly([-0.25, 0.93, 0, 0.62, 0.25, 0.93]); c.stroke();
+        c.rotate(Math.PI / 3);
+      }
+      break;
+    case "laser":
+      c.lineWidth = 0.22; c.beginPath(); c.arc(0, 0, 0.56, 0, TAU); c.stroke();
+      for (let a = 0; a < 4; a++) { poly([0, -0.34, 0, -0.97]); c.stroke(); c.rotate(Math.PI / 2); }
+      dot(0, 0, 0.13);
+      break;
+    case "shield":
+      c.beginPath(); c.moveTo(0, -0.97); c.lineTo(0.8, -0.66); c.lineTo(0.8, 0);
+      c.quadraticCurveTo(0.75, 0.7, 0, 1); c.quadraticCurveTo(-0.75, 0.7, -0.8, 0); c.lineTo(-0.8, -0.66);
+      c.closePath(); c.fill();
+      break;
+    case "magnet":
+      c.lineWidth = 0.44; c.lineCap = "butt";
+      c.beginPath(); c.moveTo(-0.56, 0.4); c.lineTo(-0.56, -0.2); c.arc(0, -0.2, 0.56, Math.PI, 0); c.lineTo(0.56, 0.4); c.stroke();
+      c.fillRect(-0.78, 0.54, 0.44, 0.4); c.fillRect(0.34, 0.54, 0.44, 0.4);
+      break;
+    case "quake": poly([-0.95, 0.15, -0.55, -0.6, -0.15, 0.55, 0.25, -0.6, 0.6, 0.4, 0.95, -0.15]); c.stroke(); break;
+    case "mirror":
+      poly([-0.17, -0.8, -0.17, 0.8, -0.98, 0.8], true); c.fill();
+      c.lineWidth = 0.18; poly([0.27, -0.5, 0.27, 0.7, 0.85, 0.7], true); c.stroke();
+      break;
+    case "steal":
+      // a thief's mask: a band with two eye holes
+      c.beginPath(); c.moveTo(-0.98, -0.1); c.quadraticCurveTo(-0.98, -0.55, -0.5, -0.55); c.quadraticCurveTo(0, -0.4, 0.5, -0.55);
+      c.quadraticCurveTo(0.98, -0.55, 0.98, -0.1); c.quadraticCurveTo(0.95, 0.55, 0.45, 0.55); c.quadraticCurveTo(0.15, 0.55, 0, 0.25);
+      c.quadraticCurveTo(-0.15, 0.55, -0.45, 0.55); c.quadraticCurveTo(-0.95, 0.55, -0.98, -0.1); c.closePath();
+      c.moveTo(-0.24, 0); c.ellipse(-0.48, 0, 0.24, 0.19, 0, 0, TAU); c.moveTo(0.72, 0); c.ellipse(0.48, 0, 0.24, 0.19, 0, 0, TAU);
+      c.fill("evenodd");
+      break;
+  }
+  c.restore();
+}
+
 function drawHeader() {
   text("Turf Pong", BX, 150, "700 44px Manrope, system-ui, sans-serif", CV.fg, "left", -1);
   text(fmt(time), BX + BW, 150, "400 30px 'DM Mono', ui-monospace, monospace", CV.dim, "right");
@@ -343,20 +453,21 @@ function drawStrip() {
     ctx.fillStyle = T.ball; ctx.fillRect(x, y + h - 5, cw * pct, 5);
     ctx.fillStyle = rgba(CV.fg, 0.5); ctx.fillRect(x + cw * TARGET - 1, y + h - 14, 2, 14);
     ctx.restore();
-    const nameSize = n === 4 ? 20 : 22;
+    const label = T.name.toUpperCase(), room = cw - 40 - 96; // keep long names clear of the share number
+    let nameSize = n === 4 ? 20 : 22;
+    for (; nameSize > 12; nameSize--) { ctx.font = `700 ${nameSize}px Manrope, system-ui, sans-serif`; if (ctx.measureText(label).width + 2 * label.length <= room) break; }
     ctx.fillStyle = T.ball; ctx.beginPath(); ctx.arc(x + 24, y + 31, 7, 0, Math.PI * 2); ctx.fill();
-    text(T.name.toUpperCase(), x + 40, y + 39, `700 ${nameSize}px Manrope, system-ui, sans-serif`, T.tile, "left", 2);
+    text(label, x + 40, y + 39, `700 ${nameSize}px Manrope, system-ui, sans-serif`, T.tile, "left", 2);
     text(Math.round(pct * 100) + "%", x + cw - 18, y + 40, "500 28px 'DM Mono', ui-monospace, monospace", CV.fg, "right");
     // power-up rings
-    const fx = teamEffects(t), r = 12, step = 2 * r + 7, fit = Math.floor((cw - 36 + 7) / step);
+    const fx = teamEffects(t), r = 14, step = 2 * r + 6, fit = Math.floor((cw - 36 + 6) / step);
     fx.slice(0, fit).forEach((f, k) => {
-      const cx = x + 18 + r + k * step, cy = y + 62, col = f.neg ? CV.dim : T.ball;
+      const cx = x + 18 + r + k * step, cy = y + 63, col = f.neg ? CV.dim : T.ball;
       ctx.fillStyle = rgba(f.neg ? CV.dim : T.ball, 0.22); ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = col; ctx.lineWidth = 3.5; ctx.lineCap = "round";
-      ctx.beginPath(); ctx.arc(cx, cy, r - 1.75, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.02, Math.min(1, f.p))); ctx.stroke();
-      ctx.fillStyle = f.neg ? CV.bg : T.tile; ctx.beginPath(); ctx.arc(cx, cy, r - 4, 0, Math.PI * 2); ctx.fill();
-      ctx.font = "500 12px 'DM Mono', ui-monospace, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillStyle = f.neg ? CV.fg : CV.ink; ctx.fillText(POWERS[f.k].g, cx, cy + 1);
+      ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(cx, cy, r - 1.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.02, Math.min(1, f.p))); ctx.stroke();
+      ctx.fillStyle = f.neg ? CV.bg : T.tile; ctx.beginPath(); ctx.arc(cx, cy, r - 3, 0, Math.PI * 2); ctx.fill();
+      drawIcon(ctx, f.k, cx, cy, 16, f.neg ? CV.fg : CV.ink);
     });
     ctx.globalAlpha = 1;
   }
@@ -380,8 +491,7 @@ function drawBoard() {
   for (const p of pickups) {
     const x = p.x * cs, y = p.y * cs, pulse = 1 + 0.08 * Math.sin((time - p.born) * 5);
     ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(x, y, cs * 0.44 * pulse, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = CV.ink; ctx.font = `700 ${Math.floor(cs * 0.44)}px Manrope, system-ui, sans-serif`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(POWERS[p.type].g, x, y + 1);
+    drawIcon(ctx, p.type, x, y, cs * 0.58 * pulse, CV.ink);
   }
   for (const b of balls) {
     const T = TEAMS[b.team], r = b.r * (b.giant > 0 ? 2.5 : 1) * cs, ice = frozen[b.team] > 0;
@@ -499,7 +609,26 @@ $("snd").onclick = e => { soundOn = !soundOn; e.currentTarget.setAttribute("aria
 cv.onclick = () => { if (over && !rendering) reset(); };
 [..."t2 t3 t4 restart".split(" ")].forEach(id => $(id).addEventListener("click", e => { if (rendering) e.stopImmediatePropagation(); }, true));
 press("gTeams", $("t2")); press("gSpeed", $("s1"));
-$("pwList").innerHTML = KEYS.map(k => `<div><code>${POWERS[k].g}</code><span><b>${POWERS[k].label}</b> ${POWERS[k].desc}</span></div>`).join("");
+// Colours row: one picker per team. "Random" (the default) draws a new colour every game.
+for (let t = 0; t < 4; t++) {
+  const lab = document.createElement("label"), sw = document.createElement("i"), sel = document.createElement("select");
+  sel.id = "c" + (t + 1); sel.setAttribute("aria-label", `Team ${t + 1} colour`);
+  sel.innerHTML = `<option value="-1">Random</option>` + PALETTE.map((p, i) => `<option value="${i}">${p.name}</option>`).join("");
+  sel.onchange = () => {
+    if (rendering) { sel.value = choice[t]; return; }
+    choice[t] = +sel.value;
+    if (choice[t] >= 0) for (let o = 0; o < 4; o++) if (o !== t && choice[o] === choice[t]) { choice[o] = -1; $("c" + (o + 1)).value = -1; }
+    reset();
+  };
+  lab.append(sw, sel); $("gCols").append(lab);
+}
+$("pwList").innerHTML = KEYS.map(k => `<div><canvas width="48" height="48" data-k="${k}"></canvas><span><b>${POWERS[k].label}</b> ${POWERS[k].desc}</span></div>`).join("");
+function drawLegend() {
+  const col = getComputedStyle(document.body).color;
+  document.querySelectorAll("#pwList canvas").forEach(c => { const g = c.getContext("2d"); g.clearRect(0, 0, 48, 48); drawIcon(g, c.dataset.k, 24, 24, 42, col); });
+}
+drawLegend();
+if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawLegend);
 
 window.addEventListener("resize", resize);
 if (window.ResizeObserver) new ResizeObserver(resize).observe($("stage"));
