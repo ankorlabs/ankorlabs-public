@@ -5,7 +5,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: the whole game lives in one 9:16 frame (Instagram Reel size); controls sit outside it */
+/* Layout: the whole game lives in one 9:16 frame; controls sit outside it */
 :root {
   --bg: #f1f0ee;
   --fg: #2a2b30;
@@ -33,18 +33,11 @@ canvas { display: block; border-radius: 14px; box-shadow: 0 0 0 1px var(--line);
 .controls { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12px; align-items: center; }
 .grp { display: flex; gap: 2px; align-items: center; }
 .grp span { color: var(--dim); margin-right: 6px; }
-button, .save { font: inherit; background: none; border: 0; color: var(--dim); padding: 3px 5px; cursor: pointer; border-radius: 4px; }
+button { font: inherit; background: none; border: 0; color: var(--dim); padding: 3px 5px; cursor: pointer; border-radius: 4px; }
 button:hover { color: var(--fg); }
 button[aria-pressed="true"] { color: var(--fg); font-weight: 700; }
-button:focus-visible, .save:focus-visible { outline: 1.5px solid var(--fg); }
+button:focus-visible { outline: 1.5px solid var(--fg); }
 #restart { margin-left: auto; color: var(--fg); }
-.recrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12px; }
-#rec { display: inline-flex; align-items: center; gap: 7px; color: var(--fg); border: 1px solid var(--line); border-radius: 999px; padding: 6px 13px; }
-#rec::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--rec); }
-#rec.on::before { animation: blink 1s steps(2) infinite; }
-@keyframes blink { 50% { opacity: .2; } }
-#recMsg { color: var(--dim); font-family: var(--mono); font-variant-numeric: tabular-nums; }
-.save { color: var(--fg); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; padding: 0; }
 details { font-size: 12px; color: var(--dim); }
 summary { cursor: pointer; list-style: none; }
 summary::-webkit-details-marker { display: none; }
@@ -52,7 +45,6 @@ summary::-webkit-details-marker { display: none; }
 .pw div { display: flex; gap: 8px; align-items: baseline; }
 .pw code { font-family: var(--mono); color: var(--fg); width: 12px; text-align: center; flex: none; }
 .pw b { color: var(--fg); font-weight: 500; }
-@media (prefers-reduced-motion: reduce) { #rec.on::before { animation: none; } }
 </style>
 <style>
 body { padding-block: 0 16px; }
@@ -81,15 +73,9 @@ body { padding-block: 0 16px; }
     <div class="grp"><button id="pw" aria-pressed="true">Power-ups</button><button id="snd" aria-pressed="true">Sound</button></div>
     <button id="restart">Restart</button>
   </div>
-  <div class="recrow">
-    <button id="rec">Record a game</button>
-    <span id="recMsg">Makes a 1080×1920 MP4 with sound of one full game, ready for Reels</span>
-    <a class="save" id="save" hidden>Save video</a>
-  </div>
   <details><summary>Power-ups ›</summary><div class="pw" id="pwList"></div></details>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.min.js"></script>
 <script>
 (() => {
 const COLS = 20, ROWS = 26, BASE_SPEED = 20, TARGET = 0.85;
@@ -496,173 +482,7 @@ function wakeAudio() { // browsers only allow sound after a click or key press
 document.addEventListener("pointerdown", wakeAudio);
 document.addEventListener("keydown", wakeAudio);
 
-// ---------- video making ----------
-// Renders the game frame by frame (30 fps, 1080×1920 H.264 + AAC sound, MP4) instead of capturing the screen,
-// so the video is smooth on any computer and finishes faster than real time.
-const FPS = 30, MAX_SECONDS = 180, END_HOLD = 3.5, SR = 48000;
-let rendering = false, cancelRender = false, saveUrl = null;
-const msg = t => { $("recMsg").textContent = t; };
-const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
-
-async function pickVideoCodec() {
-  if (!window.VideoEncoder || !window.Mp4Muxer) return null;
-  for (const codec of ["avc1.640028", "avc1.4d0028", "avc1.42003e"]) {
-    const cfg = { codec, width: W, height: H, bitrate: 8_000_000, framerate: FPS };
-    try { if ((await VideoEncoder.isConfigSupported(cfg)).supported) return cfg; } catch (e) {}
-  }
-  return null;
-}
-async function pickAudioCodec() {
-  if (!window.AudioEncoder || !window.OfflineAudioContext) return null;
-  const cfg = { codec: "mp4a.40.2", sampleRate: SR, numberOfChannels: 2, bitrate: 128000 };
-  try { if ((await AudioEncoder.isConfigSupported(cfg)).supported) return cfg; } catch (e) {}
-  return null;
-}
-async function renderSound(events, seconds) {
-  const oc = new OfflineAudioContext(2, Math.ceil(seconds * SR), SR), out = makeOut(oc);
-  for (const ev of events) if (ev.t < seconds - 0.05) play(oc, out, ev, ev.t + 0.001);
-  return oc.startRendering();
-}
-async function encodeSound(buf, muxer, cfg) {
-  let err = null;
-  const enc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: e => { err = e; } });
-  enc.configure(cfg);
-  const L = buf.getChannelData(0), R = buf.getChannelData(1), block = 1024;
-  for (let i = 0; i < buf.length && !err; i += block) {
-    const n = Math.min(block, buf.length - i), data = new Float32Array(n * 2);
-    data.set(L.subarray(i, i + n), 0); data.set(R.subarray(i, i + n), n);
-    const ad = new AudioData({ format: "f32-planar", sampleRate: SR, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(i * 1e6 / SR), data });
-    enc.encode(ad); ad.close();
-  }
-  await enc.flush(); enc.close();
-  if (err) throw err;
-}
-
-function applyOptions(o) {
-  if (o.teams) { nTeams = Math.max(2, Math.min(4, +o.teams | 0)); press("gTeams", $("t" + nTeams)); }
-  if (o.speed) { speedMult = [1, 2, 4].includes(+o.speed) ? +o.speed : 1; press("gSpeed", $("s" + speedMult)); }
-  if (o.powerups !== undefined) { powersOn = !(o.powerups === false || o.powerups === "0" || o.powerups === 0); $("pw").setAttribute("aria-pressed", powersOn); }
-}
-
-// Makes one full game as an MP4. Options: { teams: 2-4, speed: 1|2|4, seed: any text, powerups: true|false }.
-// Returns { blob, filename, winner, winnerShare, teams, seed, seconds, hasSound }.
-async function makeVideo(opts = {}, onProgress = () => {}) {
-  if (rendering) throw new Error("Already making a video");
-  applyOptions(opts);
-  const vcfg = await pickVideoCodec();
-  if (!vcfg) throw new Error("This browser can't make videos. Use Chrome or Edge on a computer.");
-  const acfg = await pickAudioCodec();
-  if (document.fonts) { try { await document.fonts.ready; } catch (e) {} }
-  const seed = String(opts.seed ?? `${today()}-${Math.floor(Math.random() * 1e6)}`);
-  rendering = true; cancelRender = false;
-  const muxer = new Mp4Muxer.Muxer({
-    target: new Mp4Muxer.ArrayBufferTarget(),
-    video: { codec: "avc", width: W, height: H },
-    ...(acfg ? { audio: { codec: "aac", numberOfChannels: 2, sampleRate: SR } } : {}),
-    fastStart: "in-memory",
-  });
-  let failed = null;
-  const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { failed = e; } });
-  enc.configure(vcfg);
-  seedRandom(seed); reset(); noteStep = 0; lastHit.fill(-1);
-  recEvents = [];
-  const dt = speedMult / FPS;
-  let frame = 0, holdFrames = 0;
-  try {
-    while (!cancelRender && !failed) {
-      recClock = frame / FPS;
-      if (over) update(1 / FPS); else update(dt); // win screen animates at normal speed
-      draw();
-      const vf = new VideoFrame(cv, { timestamp: Math.round(frame * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
-      enc.encode(vf, { keyFrame: frame % (FPS * 2) === 0 });
-      vf.close();
-      frame++;
-      if (over && ++holdFrames >= END_HOLD * FPS) break; // keep the winner on screen for 3.5 real seconds
-      if (frame >= FPS * MAX_SECONDS) break;
-      if (frame % 15 === 0) {
-        onProgress(frame / FPS);
-        while (enc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 5));
-        await new Promise(r => setTimeout(r, 0));
-      }
-    }
-    if (failed) throw failed;
-    if (cancelRender) { enc.close(); throw new Error("Cancelled"); }
-    await enc.flush(); enc.close();
-    const seconds = frame / FPS;
-    if (acfg) { onProgress(seconds, "Adding sound…"); await encodeSound(await renderSound(recEvents, seconds), muxer, acfg); }
-    muxer.finalize();
-    const blob = new Blob([muxer.target.buffer], { type: "video/mp4" });
-    const win = winInfo ? winInfo.team : counts.indexOf(Math.max(...counts));
-    return {
-      blob, filename: `turf-pong-${seed}.mp4`.replace(/[^\w.-]+/g, "-"),
-      winner: TEAMS[win].name, winnerShare: Math.round(counts[win] / owner.length * 100),
-      teams: TEAMS.slice(0, nTeams).map((T, t) => ({ name: T.name, share: Math.round(counts[t] / owner.length * 100) })),
-      seed, seconds: Math.round(seconds * 10) / 10, hasSound: !!acfg, finished: !!winInfo,
-    };
-  } catch (e) {
-    try { enc.close(); } catch (_) {}
-    throw e;
-  } finally {
-    rendering = false; recEvents = null; rng = Math.random;
-    last = performance.now();
-  }
-}
-
-const toBase64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
-
-function offerFile(result) {
-  if (saveUrl) URL.revokeObjectURL(saveUrl);
-  saveUrl = URL.createObjectURL(result.blob);
-  const a = $("save");
-  a.href = saveUrl; a.download = result.filename;
-  a.hidden = false; a.textContent = `Save video (${(result.blob.size / 1e6).toFixed(1)} MB)`;
-  try { a.click(); } catch (e) {}
-}
-
-$("rec").onclick = async () => {
-  if (rendering) { cancelRender = true; return; }
-  $("save").hidden = true;
-  $("rec").classList.add("on"); $("rec").textContent = "Cancel";
-  try {
-    const r = await makeVideo({}, (s, note) => msg(note || `Making video… ${fmt(s)}`));
-    offerFile(r);
-    msg(`Done · ${fmt(r.seconds)} · ${r.winner} wins${r.hasSound ? "" : " · no sound in this browser"}`);
-  } catch (e) {
-    msg(e.message === "Cancelled" ? "Cancelled." : "Video failed: " + (e.message || e));
-  } finally {
-    $("rec").classList.remove("on"); $("rec").textContent = "Record a game";
-  }
-};
-
-// For an AI agent or script: window.TurfPong.makeVideo({...}) resolves to the result plus mp4Base64.
-// Or open the page with ?agent=1&teams=3&speed=1&seed=2026-11-12 and it makes the video by itself,
-// saves the file, writes the result into <script id="agent-result" type="application/json">,
-// and sets the tab title to TURF-PONG-DONE (or TURF-PONG-FAILED).
-window.TurfPong = {
-  version: 1,
-  async makeVideo(opts = {}) { const r = await makeVideo(opts); return { ...r, blob: undefined, mp4Base64: await toBase64(r.blob) }; },
-};
-async function runAgentMode(q) {
-  const out = document.createElement("script");
-  out.type = "application/json"; out.id = "agent-result";
-  try {
-    msg("Agent mode: making today's video…");
-    const r = await makeVideo({ teams: q.get("teams"), speed: q.get("speed"), seed: q.get("seed") || today(), powerups: q.get("powerups") ?? undefined },
-      (s, note) => msg(note || `Agent mode: making video… ${fmt(s)}`));
-    const meta = { ok: true, ...r, blob: undefined, bytes: r.blob.size };
-    if (q.get("base64") !== "0") meta.mp4Base64 = await toBase64(r.blob);
-    out.textContent = JSON.stringify(meta);
-    document.body.appendChild(out);
-    if (q.get("download") !== "0") offerFile(r);
-    msg(`Agent mode: done · ${r.winner} wins`);
-    document.title = "TURF-PONG-DONE";
-  } catch (e) {
-    out.textContent = JSON.stringify({ ok: false, error: String(e && e.message || e) });
-    document.body.appendChild(out);
-    msg("Agent mode failed: " + (e.message || e));
-    document.title = "TURF-PONG-FAILED";
-  }
-}
+let rendering = false;
 
 // ---------- controls ----------
 function resize() {
@@ -695,7 +515,6 @@ function loop(now) {
 }
 reset(); resize();
 requestAnimationFrame(loop);
-{ const q = new URLSearchParams(location.search); if (q.get("agent") === "1") runAgentMode(q); }
 })();
 </script>
 
